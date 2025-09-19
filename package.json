@@ -4,7 +4,7 @@
   "description": "AI-powered digital staff for small businesses",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node chat-server.js",
     "dev": "nodemon server.js",
     "build": "echo 'No build needed'",
     "init-db": "node scripts/init-database.js"

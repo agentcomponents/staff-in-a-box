@@ -1,10 +1,8 @@
 const express = require('express');
-const cors = require('cors');
 
 const app = express();
 
 // Basic middleware
-app.use(cors());
 app.use(express.json());
 
 // Health check endpoint
@@ -39,14 +37,27 @@ app.post('/api/agents/chat', (req, res) => {
   });
 });
 
+// Debug environment
+console.log('Starting server...');
+console.log('Environment variables:');
+console.log('- PORT:', process.env.PORT);
+console.log('- NODE_ENV:', process.env.NODE_ENV);
+
 // Start server
 const PORT = process.env.PORT || 3001;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = '0.0.0.0';
+
+console.log(`Attempting to bind to ${HOST}:${PORT}`);
 
 const server = app.listen(PORT, HOST, () => {
-  console.log(`Minimal server running on ${HOST}:${PORT}`);
+  console.log(`✅ Server successfully started on ${HOST}:${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`Health check: http://${HOST}:${PORT}/health`);
+});
+
+server.on('error', (error) => {
+  console.error('❌ Server error:', error);
+  process.exit(1);
 });
 
 // Graceful shutdown

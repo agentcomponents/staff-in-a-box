@@ -40,10 +40,23 @@ async function logToGoogleSheets(leadData) {
   try {
     const { JWT } = require('google-auth-library');
 
-    // Create JWT client
+    // Create JWT client with improved key parsing
+    let privateKey = process.env.GOOGLE_PRIVATE_KEY;
+
+    // Handle different key formats
+    if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+      privateKey = privateKey.slice(1, -1);
+    }
+    privateKey = privateKey.replace(/\\n/g, '\n');
+
+    // Ensure proper key format
+    if (!privateKey.includes('-----BEGIN PRIVATE KEY-----')) {
+      throw new Error('Private key format is invalid. Make sure it includes the BEGIN/END markers.');
+    }
+
     const jwtClient = new JWT({
       email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      key: privateKey,
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
 

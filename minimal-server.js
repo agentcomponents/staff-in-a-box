@@ -1,11 +1,64 @@
 const express = require('express');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleSpreadsheet } = require('google-spreadsheet');
+const { JWT } = require('google-auth-library');
 require('dotenv').config();
 
 const app = express();
 
 // Initialize Google Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
+
+// In-memory session storage (use Redis/database in production)
+const sessions = new Map();
+
+// Google Sheets integration for lead logging
+async function logLeadToSheet(leadData) {
+  try {
+    if (!process.env.GOOGLE_SHEETS_ID || !process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
+      console.log('Google Sheets credentials not configured, logging lead locally:', leadData);
+      return;
+    }
+
+    const serviceAccountAuth = new JWT({
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEETS_ID, serviceAccountAuth);
+    await doc.loadInfo();
+
+    const sheet = doc.sheetsByIndex[0]; // First sheet
+    await sheet.addRow({
+      Timestamp: new Date().toISOString(),
+      Name: leadData.name,
+      Email: leadData.email,
+      Phone: leadData.phone,
+      Inquiry: leadData.inquiry,
+      Source: 'AI Chat Widget'
+    });
+
+    console.log('Lead logged to Google Sheets:', leadData.name);
+  } catch (error) {
+    console.error('Error logging lead to Google Sheets:', error);
+  }
+}
+
+// Helper function to get or create session
+function getSession(sessionId) {
+  if (!sessions.has(sessionId)) {
+    sessions.set(sessionId, {
+      id: sessionId,
+      hasGreeted: false,
+      hasMadeBusinessInquiry: false,
+      leadCollected: false,
+      messages: [],
+      leadInfo: {}
+    });
+  }
+  return sessions.get(sessionId);
+}
 
 // Basic middleware
 app.use(express.json());
@@ -22,33 +75,95 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Chat endpoint with AI integration
+// Enhanced chat endpoint with conversation state and lead collection
 app.post('/api/agents/chat', async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, sessionId = 'default' } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    // Try Google Gemini AI first
+    const session = getSession(sessionId);
+    session.messages.push({ role: 'user', content: message });
+
+    const lowerMessage = message.toLowerCase();
+
+    // Check if user is providing lead information
+    if (session.hasMadeBusinessInquiry && !session.leadCollected) {
+      const leadData = extractLeadInfo(message);
+      if (leadData.hasContact) {
+        session.leadInfo = { ...session.leadInfo, ...leadData };
+
+        // Check if we have all required info
+        if (session.leadInfo.name && (session.leadInfo.email || session.leadInfo.phone)) {
+          session.leadCollected = true;
+
+          // Log to Google Sheets
+          await logLeadToSheet({
+            name: session.leadInfo.name,
+            email: session.leadInfo.email || '',
+            phone: session.leadInfo.phone || '',
+            inquiry: session.leadInfo.inquiry || session.messages[session.messages.length - 2]?.content || 'General inquiry'
+          });
+
+          return res.json({
+            response: {
+              message: `Thanks ${session.leadInfo.name}! I've got your information and someone from our team will reach out to you soon about your project. In the meantime, is there anything specific about your website requirements you'd like to discuss?`,
+              agentType: 'receptionist'
+            }
+          });
+        } else {
+          const missing = [];
+          if (!session.leadInfo.name) missing.push('name');
+          if (!session.leadInfo.email && !session.leadInfo.phone) missing.push('email or phone number');
+
+          return res.json({
+            response: {
+              message: `Could I also get your ${missing.join(' and ')}? This helps us follow up with you properly.`,
+              agentType: 'receptionist'
+            }
+          });
+        }
+      }
+    }
+
+    // Check for greeting
+    if (!session.hasGreeted && isGreeting(message)) {
+      session.hasGreeted = true;
+      return res.json({
+        response: {
+          message: "Hello! I'm here to help with your web development needs. What can I assist you with today?",
+          agentType: 'receptionist'
+        }
+      });
+    }
+
+    // Check for business inquiry after greeting
+    if (session.hasGreeted && !session.hasMadeBusinessInquiry && isBusinessInquiry(message)) {
+      session.hasMadeBusinessInquiry = true;
+      session.leadInfo.inquiry = message;
+    }
+
+    // Use AI for intelligent responses
     try {
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-      const prompt = `You are a professional virtual receptionist for a web development company.
+      let prompt = `You are a professional virtual receptionist for a web development company.
 
-IMPORTANT: Keep responses SHORT and DIRECT. Answer their specific question first, then briefly mention web services if relevant.
+IMPORTANT: Keep responses SHORT and DIRECT. Answer their specific question first.
 
 Guidelines:
 - Answer their actual question directly
 - Keep responses under 2 sentences for non-business questions
-- For business questions, be helpful but concise
 - Pricing: Simple sites $1,500-$3,000, Business sites $3,000-$8,000, E-commerce $8,000-$15,000+
-- For urgent matters: "I'll connect you with someone right away. Can I get your name and phone number?"
 
-Customer message: "${message}"
+Customer message: "${message}"`;
 
-Respond professionally and concisely:`;
+      // If they've made a business inquiry but we haven't collected leads, ask for contact info
+      if (session.hasMadeBusinessInquiry && !session.leadCollected && shouldCollectLead(message)) {
+        prompt += `\n\nAfter answering their question, ask for their name and contact information (email or phone) so you can follow up with more details about their project.`;
+      }
 
       const result = await model.generateContent(prompt);
       const aiResponse = result.response.text();
@@ -62,28 +177,11 @@ Respond professionally and concisely:`;
 
     } catch (aiError) {
       console.error('AI Error:', aiError);
-      // Fall back to hardcoded responses if AI fails
+      // Fall back to hardcoded responses
     }
 
-    // Fallback responses
-    let response = "Thanks for reaching out! I'd be happy to help you with your website project. What type of website are you looking for?";
-
-    const lowerMessage = message.toLowerCase();
-
-    // Pricing inquiries
-    if (lowerMessage.includes('price') || lowerMessage.includes('cost') || lowerMessage.includes('how much') || lowerMessage.includes('pricing')) {
-      response = "I'd rather give you a total project cost upfront so there's no confusion. What type of website are you looking for - a simple one-page site, business website, or e-commerce store? Projects typically range from $1,500 for simple sites to $15,000+ for complex e-commerce.";
-    }
-
-    // Urgency handling
-    if (lowerMessage.includes('urgent') || lowerMessage.includes('asap') || lowerMessage.includes('emergency') || lowerMessage.includes('rush')) {
-      response = "I understand this is urgent! To get you immediate assistance, I need to connect you with someone right away. Could I get your name and phone number so our team can reach you within the next few minutes?";
-    }
-
-    // Off-topic questions
-    if (lowerMessage.includes('sky') || lowerMessage.includes('weather') || lowerMessage.includes('color') || lowerMessage.includes('football') || lowerMessage.includes('news')) {
-      response = "I appreciate your question, but I'm here specifically to help with website development projects. Is there anything about creating a website for your business that I can help you with today?";
-    }
+    // Fallback responses with state awareness
+    let response = getStateAwareFallbackResponse(message, session);
 
     res.json({
       response: {
@@ -97,6 +195,84 @@ Respond professionally and concisely:`;
     res.status(500).json({ error: 'Failed to process message' });
   }
 });
+
+// Helper functions for conversation state
+function isGreeting(message) {
+  const greetings = ['hi', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'];
+  return greetings.some(greeting => message.toLowerCase().includes(greeting));
+}
+
+function isBusinessInquiry(message) {
+  const businessKeywords = ['website', 'price', 'cost', 'quote', 'project', 'development', 'design', 'ecommerce', 'business', 'site'];
+  return businessKeywords.some(keyword => message.toLowerCase().includes(keyword));
+}
+
+function shouldCollectLead(message) {
+  const leadTriggers = ['price', 'cost', 'quote', 'how much', 'pricing', 'urgent', 'asap', 'project', 'build', 'need'];
+  return leadTriggers.some(trigger => message.toLowerCase().includes(trigger));
+}
+
+function extractLeadInfo(message) {
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+  const phoneRegex = /(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/;
+  const nameRegex = /(?:my name is|i'm|i am|call me)\s+([a-zA-Z\s]{2,30})(?:\s+and|$)/i;
+
+  const result = {
+    hasContact: false
+  };
+
+  const email = message.match(emailRegex);
+  if (email) {
+    result.email = email[0];
+    result.hasContact = true;
+  }
+
+  const phone = message.match(phoneRegex);
+  if (phone) {
+    result.phone = phone[0];
+    result.hasContact = true;
+  }
+
+  const name = message.match(nameRegex);
+  if (name) {
+    result.name = name[1].trim();
+    result.hasContact = true;
+  }
+
+  // Simple name detection for messages that are just names (2-3 words)
+  if (!result.name && message.split(' ').length >= 2 && message.split(' ').length <= 3 && /^[a-zA-Z\s]+$/.test(message.trim())) {
+    result.name = message.trim();
+    result.hasContact = true;
+  }
+
+  return result;
+}
+
+function getStateAwareFallbackResponse(message, session) {
+  const lowerMessage = message.toLowerCase();
+
+  // If we need to collect lead info
+  if (session.hasMadeBusinessInquiry && !session.leadCollected && shouldCollectLead(message)) {
+    if (lowerMessage.includes('price') || lowerMessage.includes('cost') || lowerMessage.includes('how much')) {
+      return "Our websites range from $1,500 for simple sites to $15,000+ for e-commerce. To give you an accurate quote, could I get your name and email or phone number?";
+    }
+    if (lowerMessage.includes('urgent')) {
+      return "I understand this is urgent! I'll connect you with someone right away. Could I get your name and phone number?";
+    }
+    return "I'd be happy to help with your project. Could I get your name and contact information so I can have someone follow up with you?";
+  }
+
+  // Standard fallback responses
+  if (lowerMessage.includes('price') || lowerMessage.includes('cost') || lowerMessage.includes('how much')) {
+    return "Our websites range from $1,500 for simple sites to $15,000+ for e-commerce. What type of project do you have in mind?";
+  }
+
+  if (lowerMessage.includes('urgent')) {
+    return "I understand this is urgent! What type of website assistance do you need?";
+  }
+
+  return "Thanks for reaching out! I'd be happy to help you with your website project. What type of website are you looking for?";
+}
 
 // Debug environment
 console.log('Starting server...');

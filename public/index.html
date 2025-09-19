@@ -127,6 +127,13 @@
     <script>
         const API_BASE_URL = 'https://staff-in-a-box-production.up.railway.app';
 
+        // Generate unique session ID for this browser session
+        let sessionId = localStorage.getItem('chatSessionId');
+        if (!sessionId) {
+            sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('chatSessionId', sessionId);
+        }
+
         function addMessage(message, isUser = false) {
             const chatMessages = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
@@ -181,7 +188,8 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        message: message
+                        message: message,
+                        sessionId: sessionId
                     })
                 });
 

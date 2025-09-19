@@ -105,7 +105,7 @@ console.log('Starting server...');
 console.log('Environment variables:');
 console.log('- PORT:', process.env.PORT);
 console.log('- NODE_ENV:', process.env.NODE_ENV);
-console.log('- GOOGLE_AI_API_KEY:', process.env.GOOGLE_AI_API_KEY ? 'Set' : 'Not set');
+console.log('- GOOGLE_AI_API_KEY:', process.env.GOOGLE_AI_API_KEY ? 'Set ✓' : 'Not set ✗');
 
 // Start server
 const PORT = process.env.PORT || 3001;

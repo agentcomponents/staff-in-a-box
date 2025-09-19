@@ -405,8 +405,44 @@ function extractLeadInfo(message) {
 function getIntelligentFallback(message, session) {
   const lowerMessage = message.toLowerCase();
 
+  // Handle greetings after initial greeting
+  if (session.hasGreeted && isGreeting(message)) {
+    return "What can I help you with for your website project?";
+  }
+
+  // Handle specific business types intelligently FIRST
+  if (lowerMessage === 'salon' || lowerMessage.includes('salon')) {
+    session.hasMadeBusinessInquiry = true;
+    session.leadInfo.inquiry = message;
+    return "Great! A salon website is a perfect way to showcase your services and allow online booking. What specific features are you looking for - online appointments, service galleries, or something else?";
+  }
+
+  // Handle name detection specially (but not if it's a business type)
+  const businessTypes = ['salon', 'restaurant', 'store', 'shop', 'business', 'website'];
+  const isBusinessType = businessTypes.some(type => lowerMessage.includes(type));
+
+  if (!isBusinessType) {
+    const leadData = extractLeadInfo(message);
+    if (leadData.hasContact && leadData.name) {
+      session.leadInfo = { ...session.leadInfo, ...leadData };
+      return `Hi ${leadData.name}! Nice to meet you. What type of website project can I help you with?`;
+    }
+  }
+
+  if (lowerMessage === 'restaurant' || lowerMessage.includes('restaurant')) {
+    session.hasMadeBusinessInquiry = true;
+    session.leadInfo.inquiry = message;
+    return "Excellent! Restaurant websites are great for showcasing your menu and taking online orders. Are you looking for online ordering, reservations, or just an informational site?";
+  }
+
+  if (lowerMessage === 'business' || lowerMessage.includes('business website')) {
+    session.hasMadeBusinessInquiry = true;
+    session.leadInfo.inquiry = message;
+    return "Perfect! Business websites help establish credibility and attract customers. What type of business is this for, and what key information do you want to showcase?";
+  }
+
   // Detect bot testing/spam behavior
-  const spamIndicators = ['you are human', 'are you a bot', 'what time is it', 'i like you', 'what you do'];
+  const spamIndicators = ['you are human', 'are you a bot', 'what time is it', 'i like you', 'what you do', 'what is your name'];
   const isSpammy = spamIndicators.some(indicator => lowerMessage.includes(indicator));
 
   // Count consecutive non-business messages
@@ -440,6 +476,24 @@ function getIntelligentFallback(message, session) {
     return "I'd be happy to help with your project. Could I get your name and contact information so I can have someone follow up with you?";
   }
 
+  // Handle business inquiries more intelligently
+  if (isBusinessInquiry(message)) {
+    session.hasMadeBusinessInquiry = true;
+    session.leadInfo.inquiry = message;
+
+    if (lowerMessage.includes('simple') || lowerMessage.includes('basic')) {
+      return "A simple website is a great choice! These typically include a homepage, about page, services, and contact info. Pricing starts around $1,500. What's your business about?";
+    }
+
+    if (lowerMessage.includes('ecommerce') || lowerMessage.includes('store') || lowerMessage.includes('shop')) {
+      return "An online store is excellent for growing your business! E-commerce sites start around $8,000 and include product pages, shopping cart, and payment processing. What will you be selling?";
+    }
+
+    if (lowerMessage.includes('need') || lowerMessage.includes('want') || lowerMessage.includes('looking for')) {
+      return "I'd love to help you get the website you need! What type of business or project is this for? That'll help me give you the best recommendations.";
+    }
+  }
+
   // Standard fallback responses
   if (lowerMessage.includes('price') || lowerMessage.includes('cost') || lowerMessage.includes('how much')) {
     return "Our websites range from $1,500 for simple sites to $15,000+ for e-commerce. What type of project do you have in mind?";
@@ -449,7 +503,8 @@ function getIntelligentFallback(message, session) {
     return "I understand this is urgent! What type of website assistance do you need?";
   }
 
-  return "Thanks for reaching out! I'd be happy to help you with your website project. What type of website are you looking for?";
+  // Final fallback - but make it less generic
+  return "I'm here to help with your website project! What type of website are you thinking about?";
 }
 
 // Debug environment

@@ -70,12 +70,21 @@ Respond as a professional receptionist would, being helpful and knowledgeable ab
     // Fallback responses
     let response = "Thanks for reaching out! I'd be happy to help you with your website project. What type of website are you looking for?";
 
-    if (message.toLowerCase().includes('price')) {
+    const lowerMessage = message.toLowerCase();
+
+    // Pricing inquiries
+    if (lowerMessage.includes('price') || lowerMessage.includes('cost') || lowerMessage.includes('how much') || lowerMessage.includes('pricing')) {
       response = "I'd rather give you a total project cost upfront so there's no confusion. What type of website are you looking for - a simple one-page site, business website, or e-commerce store? Projects typically range from $1,500 for simple sites to $15,000+ for complex e-commerce.";
     }
 
-    if (message.toLowerCase().includes('urgent')) {
+    // Urgency handling
+    if (lowerMessage.includes('urgent') || lowerMessage.includes('asap') || lowerMessage.includes('emergency') || lowerMessage.includes('rush')) {
       response = "I understand this is urgent! To get you immediate assistance, I need to connect you with someone right away. Could I get your name and phone number so our team can reach you within the next few minutes?";
+    }
+
+    // Off-topic questions
+    if (lowerMessage.includes('sky') || lowerMessage.includes('weather') || lowerMessage.includes('color') || lowerMessage.includes('football') || lowerMessage.includes('news')) {
+      response = "I appreciate your question, but I'm here specifically to help with website development projects. Is there anything about creating a website for your business that I can help you with today?";
     }
 
     res.json({

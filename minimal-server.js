@@ -74,8 +74,32 @@ async function logToGoogleSheets(leadData) {
       'AI Chat Widget'
     ];
 
-    // Make HTTP request to Google Sheets API
-    const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${process.env.GOOGLE_SHEETS_ID}/values/Sheet1!A:F:append?valueInputOption=USER_ENTERED`, {
+    // First, check if headers exist and add them if not
+    const checkResponse = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${process.env.GOOGLE_SHEETS_ID}/values/Sheet1!A1:F1`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      }
+    });
+
+    const checkData = await checkResponse.json();
+
+    // If no data in A1 or headers don't match, add headers
+    if (!checkData.values || !checkData.values[0] || checkData.values[0][0] !== 'Timestamp') {
+      const headerRow = ['Timestamp', 'Name', 'Email', 'Phone', 'Inquiry', 'Source'];
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${process.env.GOOGLE_SHEETS_ID}/values/Sheet1!A1:F1?valueInputOption=USER_ENTERED`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          values: [headerRow]
+        })
+      });
+    }
+
+    // Make HTTP request to append data to Google Sheets
+    const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${process.env.GOOGLE_SHEETS_ID}/values/Sheet1!A:F:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -217,7 +241,11 @@ app.post('/api/agents/chat', async (req, res) => {
 
       let prompt = `You are a professional virtual receptionist for a web development company.
 
-IMPORTANT: Keep responses SHORT and DIRECT. Answer their specific question first.
+CRITICAL RULES:
+- NEVER make up phone numbers, emails, or any contact information
+- NEVER claim you will call someone unless they've provided a phone number
+- Keep responses SHORT and DIRECT
+- Only state facts you know for certain
 
 Context:
 - Session state: Greeted=${session.hasGreeted}, Business inquiry=${session.hasMadeBusinessInquiry}, Lead collected=${session.leadCollected}
@@ -226,9 +254,10 @@ Context:
 Guidelines:
 - Answer their actual question directly
 - Keep responses under 2 sentences for non-business questions
-- If they seem confused or give unclear responses, gently redirect to web development
+- If they say "call me" but haven't provided a phone number, ask for their phone number
 - Pricing: Simple sites $1,500-$3,000, Business sites $3,000-$8,000, E-commerce $8,000-$15,000+
 - Don't ask for information you already have
+- If they give unclear responses, ask clarifying questions about their website needs
 
 Customer message: "${message}"`;
 

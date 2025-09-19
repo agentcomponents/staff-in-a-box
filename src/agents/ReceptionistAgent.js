@@ -1,5 +1,6 @@
 const BaseAgent = require('./BaseAgent');
 const Anthropic = require('@anthropic-ai/sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 class ReceptionistAgent extends BaseAgent {
   constructor(dbService, notificationService) {
@@ -7,6 +8,10 @@ class ReceptionistAgent extends BaseAgent {
     this.anthropic = new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY
     });
+
+    // Initialize Google Gemini for free AI responses
+    this.gemini = process.env.GOOGLE_AI_API_KEY ?
+      new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY) : null;
 
     // Escalation triggers for web design business
     this.escalationTriggers = [
@@ -39,7 +44,7 @@ class ReceptionistAgent extends BaseAgent {
         case 'pricing':
           return await this.handlePricingInquiry(message, analysis, conversation);
         case 'services':
-          return await this.handleServicesInquiry(message, analysis, conversation);
+          return await this.handleGeneralResponse(message, conversation);
         case 'timeline':
           return await this.handleTimelineInquiry(message, analysis, conversation);
         case 'contact_info':
@@ -47,10 +52,31 @@ class ReceptionistAgent extends BaseAgent {
         case 'urgency_assessment':
           return await this.handleUrgencyAssessment(message, conversation);
         default:
+          // Handle off-topic questions with AI response
+          if (analysis.isOffTopic && analysis.aiResponse) {
+            return {
+              agentType: 'receptionist',
+              message: analysis.aiResponse,
+              action: 'off_topic_redirect',
+              leadQuality: 'cold'
+            };
+          }
+
           // Check if we need to collect contact info for non-specific inquiries
           if (analysis.needsContactInfo && !conversation.hasContactInfo) {
             return await this.handleContactCollection(message, conversation);
           }
+
+          // Use AI response for general inquiries if available
+          if (analysis.aiResponse) {
+            return {
+              agentType: 'receptionist',
+              message: analysis.aiResponse,
+              action: 'ai_general_response',
+              leadQuality: 'warm'
+            };
+          }
+
           return await this.handleGeneralResponse(message, conversation);
       }
 
@@ -77,8 +103,11 @@ class ReceptionistAgent extends BaseAgent {
       };
     }
 
-    // Determine inquiry type
-    const inquiryType = this.classifyInquiry(lowerMessage);
+    // Use AI to analyze the message context and intent
+    const aiAnalysis = await this.analyzeMessageWithAI(message, conversation);
+
+    // Determine inquiry type (fallback to keyword matching if AI analysis fails)
+    const inquiryType = aiAnalysis.inquiryType || this.classifyInquiry(lowerMessage);
 
     // Check if we need contact info for this type of inquiry
     const needsContactInfo = this.requiresContactInfo(inquiryType, conversation);
@@ -87,8 +116,10 @@ class ReceptionistAgent extends BaseAgent {
       requiresEscalation: false,
       inquiryType,
       needsContactInfo,
-      projectType: this.identifyProjectType(lowerMessage),
-      urgencyLevel: this.assessUrgency(lowerMessage)
+      projectType: aiAnalysis.projectType || this.identifyProjectType(lowerMessage),
+      urgencyLevel: aiAnalysis.urgencyLevel || this.assessUrgency(lowerMessage),
+      isOffTopic: aiAnalysis.isOffTopic || false,
+      aiResponse: aiAnalysis.response
     };
   }
 
@@ -98,7 +129,7 @@ class ReceptionistAgent extends BaseAgent {
       services: ['do you do', 'can you', 'services', 'what do you offer'],
       timeline: ['how long', 'when', 'timeline', 'deadline'],
       contact_info: ['my name is', 'i\'m', 'call me', 'email me'],
-      urgency_assessment: ['right now', 'immediately', 'later', 'callback']
+      urgency_assessment: ['right now', 'immediately', 'urgent', 'asap', 'quickly', 'later', 'callback']
     };
 
     for (const [type, keywords] of Object.entries(patterns)) {
@@ -264,6 +295,19 @@ class ReceptionistAgent extends BaseAgent {
   async handleUrgencyAssessment(message, conversation) {
     const urgencyLevel = this.classifyUrgency(message);
 
+    // If urgent but no contact info, collect it first
+    if (!conversation.customer_name && urgencyLevel === 'immediate') {
+      return {
+        agentType: 'receptionist',
+        message: "I understand this is urgent! To get you immediate assistance, I need to connect you with someone right away. Could I get your name and phone number so our team can reach you within the next few minutes?",
+        action: 'collect_contact_info',
+        nextStep: 'collect_name',
+        escalationPending: true,
+        urgency: 'immediate',
+        leadQuality: 'hot'
+      };
+    }
+
     switch (urgencyLevel) {
       case 'immediate':
         return {
@@ -335,6 +379,153 @@ class ReceptionistAgent extends BaseAgent {
     const now = new Date();
     now.setHours(now.getHours() + 4); // 4 hours from now
     return now.toISOString();
+  }
+
+  async analyzeMessageWithAI(message, conversation) {
+    try {
+      this.logger.info('Starting AI analysis', {
+        hasGemini: !!this.gemini,
+        geminiKeyExists: !!process.env.GOOGLE_AI_API_KEY,
+        messagePreview: message.substring(0, 50)
+      });
+
+      // Try Google Gemini first (free tier)
+      if (this.gemini) {
+        this.logger.info('Using Gemini for analysis');
+        return await this.analyzeWithGemini(message, conversation);
+      }
+
+      this.logger.info('No Gemini available, using demo mode');
+      // Fallback to demo mode if no AI provider available
+      return this.getDemoResponse(message, conversation);
+
+    } catch (error) {
+      this.logger.error('AI analysis failed:', error);
+      // Fallback to demo mode on error
+      return this.getDemoResponse(message, conversation);
+    }
+  }
+
+  async analyzeWithGemini(message, conversation) {
+    try {
+      this.logger.info('Using Google Gemini for AI analysis', { message: message.substring(0, 50) });
+
+      const contextInfo = this.buildConversationContext(conversation);
+      const model = this.gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+      const prompt = `You are a professional receptionist for a web design business. Analyze this customer message and respond appropriately.
+
+Business Context:
+- We specialize in website design and development
+- Services: One-page sites ($1,500-$3,500), Business websites ($3,000-$10,000), E-commerce ($5,000-$15,000)
+- We need to qualify leads and collect contact information for serious inquiries
+
+Customer Message: "${message}"
+
+${contextInfo}
+
+Instructions:
+1. If the message is completely off-topic (like "where am i?" or "is the sky blue?"), acknowledge it briefly but redirect to web design services professionally
+2. If it's business-related, provide helpful information and guide toward next steps
+3. Keep responses conversational, helpful, and professional
+4. Don't ask for contact info in your response - that's handled separately
+
+Respond with ONLY a JSON object (no markdown formatting):
+{
+  "inquiryType": "pricing|services|timeline|contact_info|urgency_assessment|general",
+  "projectType": "one_page|ecommerce|redesign|new_website|unknown",
+  "urgencyLevel": "immediate|callback|flexible",
+  "isOffTopic": true,
+  "response": "That's an interesting question! While I can't help with general topics, I'd be happy to discuss how we can help with your website needs. Are you looking for web design or development services?"
+}`;
+
+      const result = await model.generateContent(prompt);
+      const responseText = result.response.text();
+
+      this.logger.info('Gemini response received', {
+        responseLength: responseText.length,
+        preview: responseText.substring(0, 100)
+      });
+
+      // Clean up the response and parse JSON
+      const cleanResponse = responseText.replace(/```json\n?|\n?```/g, '').trim();
+      const parsed = JSON.parse(cleanResponse);
+
+      this.logger.info('Gemini analysis successful', {
+        inquiryType: parsed.inquiryType,
+        isOffTopic: parsed.isOffTopic
+      });
+
+      return parsed;
+
+    } catch (error) {
+      this.logger.error('Gemini analysis failed:', error);
+      return this.getDemoResponse(message, conversation);
+    }
+  }
+
+  getDemoResponse(message, conversation) {
+    const lowerMessage = message.toLowerCase();
+
+    // Detect off-topic questions
+    const offTopicPatterns = [
+      'sky blue', 'weather', 'time', 'date', 'color', 'food', 'movie', 'music',
+      'sports', 'politics', 'news', 'health', 'animals', 'cooking', 'travel'
+    ];
+
+    const isOffTopic = offTopicPatterns.some(pattern => lowerMessage.includes(pattern));
+
+    if (isOffTopic) {
+      return {
+        inquiryType: 'general',
+        projectType: 'unknown',
+        urgencyLevel: 'flexible',
+        isOffTopic: true,
+        response: "That's an interesting question! While I can't help with general topics, I'd be happy to discuss how we can help with your website needs. Are you looking for web design or development services?"
+      };
+    }
+
+    // Business-related responses
+    if (lowerMessage.includes('price') || lowerMessage.includes('cost') || lowerMessage.includes('how much')) {
+      return {
+        inquiryType: 'pricing',
+        projectType: this.identifyProjectType(lowerMessage),
+        urgencyLevel: 'flexible',
+        isOffTopic: false,
+        response: null // Let the pricing handler take care of this
+      };
+    }
+
+    if (lowerMessage.includes('urgent') || lowerMessage.includes('asap') || lowerMessage.includes('immediately')) {
+      return {
+        inquiryType: 'urgency_assessment',
+        projectType: 'unknown',
+        urgencyLevel: 'immediate',
+        isOffTopic: false,
+        response: null // Let the urgency handler take care of this
+      };
+    }
+
+    // General business inquiry
+    return {
+      inquiryType: 'general',
+      projectType: this.identifyProjectType(lowerMessage),
+      urgencyLevel: 'flexible',
+      isOffTopic: false,
+      response: "Thanks for reaching out! I'd be happy to help you with your website project. What type of website are you looking to create?"
+    };
+  }
+
+  buildConversationContext(conversation) {
+    if (!conversation) return "This is a new conversation.";
+
+    let context = `Conversation context:\n`;
+    if (conversation.customer_name) context += `- Customer name: ${conversation.customer_name}\n`;
+    if (conversation.customer_phone) context += `- Has provided phone number\n`;
+    if (conversation.customer_email) context += `- Has provided email\n`;
+    if (conversation.messageCount) context += `- This is message #${conversation.messageCount + 1} in the conversation\n`;
+
+    return context;
   }
 
   async handleGeneralResponse(message, conversation) {

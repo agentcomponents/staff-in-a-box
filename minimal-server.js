@@ -27,7 +27,7 @@ let notificationSettings = {
 let emailTransporter = null;
 
 if (process.env.EMAIL_SERVICE && process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-  emailTransporter = nodemailer.createTransporter({
+  emailTransporter = nodemailer.createTransport({
     service: process.env.EMAIL_SERVICE || 'gmail',
     auth: {
       user: process.env.EMAIL_USER,

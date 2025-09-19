@@ -280,6 +280,9 @@ console.log('Environment variables:');
 console.log('- PORT:', process.env.PORT);
 console.log('- NODE_ENV:', process.env.NODE_ENV);
 console.log('- GOOGLE_AI_API_KEY:', process.env.GOOGLE_AI_API_KEY ? 'Set ✓' : 'Not set ✗');
+console.log('- GOOGLE_SHEETS_ID:', process.env.GOOGLE_SHEETS_ID ? 'Set ✓' : 'Not set ✗');
+console.log('- GOOGLE_SERVICE_ACCOUNT_EMAIL:', process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL ? 'Set ✓' : 'Not set ✗');
+console.log('- GOOGLE_PRIVATE_KEY:', process.env.GOOGLE_PRIVATE_KEY ? 'Set ✓' : 'Not set ✗');
 
 // Start server
 const PORT = process.env.PORT || 3001;

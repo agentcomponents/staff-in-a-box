@@ -34,11 +34,6 @@ class ReceptionistAgent extends BaseAgent {
         return await this.handleEscalation(message, analysis, conversation);
       }
 
-      // Check if we need to collect contact info
-      if (analysis.needsContactInfo && !conversation.hasContactInfo) {
-        return await this.handleContactCollection(message, conversation);
-      }
-
       // Handle different types of inquiries
       switch (analysis.inquiryType) {
         case 'pricing':
@@ -52,6 +47,10 @@ class ReceptionistAgent extends BaseAgent {
         case 'urgency_assessment':
           return await this.handleUrgencyAssessment(message, conversation);
         default:
+          // Check if we need to collect contact info for non-specific inquiries
+          if (analysis.needsContactInfo && !conversation.hasContactInfo) {
+            return await this.handleContactCollection(message, conversation);
+          }
           return await this.handleGeneralResponse(message, conversation);
       }
 

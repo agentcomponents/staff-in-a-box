@@ -410,8 +410,10 @@
             showTyping();
 
             try {
-                // Use the proper chat endpoint
-                const apiUrl = 'http://localhost:3001/api/agents/chat';
+                // Determine API endpoint based on environment
+                const apiUrl = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                    ? 'http://localhost:3001/api/agents/chat'
+                    : 'https://digitalstaff-production.up.railway.app/api/agents/chat';
 
                 // Call your Staff in a Box API
                 const response = await fetch(apiUrl, {

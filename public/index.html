@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Staff in a Box - Chat Widget</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .chat-widget {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background-color: #fafafa;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 18px;
+            max-width: 80%;
+        }
+        .user-message {
+            background-color: #007AFF;
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+        .agent-message {
+            background-color: #e5e5ea;
+            color: #000;
+        }
+        .chat-input-container {
+            padding: 20px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+        }
+        .chat-input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            outline: none;
+            font-size: 16px;
+        }
+        .send-button {
+            padding: 12px 24px;
+            background-color: #007AFF;
+            color: white;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .send-button:hover {
+            background-color: #0056b3;
+        }
+        .send-button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            text-align: center;
+            padding: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+        .error {
+            color: #ff4444;
+        }
+        .success {
+            color: #00aa00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Staff in a Box - AI Receptionist</h1>
+            <p>Test your AI-powered virtual receptionist for web development services</p>
+            <div class="status" id="status">Ready to chat! Backend: <span class="success">Connected to Railway</span></div>
+        </div>
+
+        <div class="chat-widget">
+            <div class="chat-messages" id="chatMessages">
+                <div class="message agent-message">
+                    <strong>Virtual Receptionist:</strong> Hello! Welcome to our web development service. How can I help you with your website project today?
+                </div>
+            </div>
+
+            <div class="chat-input-container">
+                <input
+                    type="text"
+                    class="chat-input"
+                    id="chatInput"
+                    placeholder="Type your message here..."
+                    onkeypress="handleKeyPress(event)"
+                >
+                <button class="send-button" id="sendButton" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'https://staff-in-a-box-production.up.railway.app';
+
+        function addMessage(message, isUser = false) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user-message' : 'agent-message'}`;
+
+            if (isUser) {
+                messageDiv.innerHTML = `<strong>You:</strong> ${message}`;
+            } else {
+                messageDiv.innerHTML = `<strong>Virtual Receptionist:</strong> ${message}`;
+            }
+
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function setStatus(message, isError = false) {
+            const status = document.getElementById('status');
+            status.innerHTML = message;
+            status.className = `status ${isError ? 'error' : 'success'}`;
+        }
+
+        function setLoading(loading) {
+            const sendButton = document.getElementById('sendButton');
+            const chatInput = document.getElementById('chatInput');
+
+            sendButton.disabled = loading;
+            chatInput.disabled = loading;
+
+            if (loading) {
+                sendButton.textContent = 'Sending...';
+                setStatus('Sending message...');
+            } else {
+                sendButton.textContent = 'Send';
+            }
+        }
+
+        async function sendMessage() {
+            const chatInput = document.getElementById('chatInput');
+            const message = chatInput.value.trim();
+
+            if (!message) return;
+
+            // Add user message to chat
+            addMessage(message, true);
+            chatInput.value = '';
+            setLoading(true);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/agents/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.response && data.response.message) {
+                    addMessage(data.response.message);
+                    setStatus('Backend: <span class="success">Connected to Railway</span>');
+                } else {
+                    throw new Error('Invalid response format');
+                }
+
+            } catch (error) {
+                console.error('Error sending message:', error);
+                addMessage('Sorry, I\'m having trouble connecting right now. Please try again in a moment.', false);
+                setStatus(`Error: ${error.message}`, true);
+            } finally {
+                setLoading(false);
+            }
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // Test connection on page load
+        async function testConnection() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/health`);
+                if (response.ok) {
+                    setStatus('Backend: <span class="success">Connected to Railway</span>');
+                } else {
+                    throw new Error('Health check failed');
+                }
+            } catch (error) {
+                setStatus(`Backend: <span class="error">Connection failed - ${error.message}</span>`, true);
+            }
+        }
+
+        // Test connection when page loads
+        window.addEventListener('load', testConnection);
+    </script>
+</body>
+</html>

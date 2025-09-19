@@ -10,6 +10,9 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
 // Basic middleware
 app.use(express.json());
 
+// Serve static files
+app.use(express.static('public'));
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({

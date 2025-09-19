@@ -33,7 +33,7 @@ app.post('/api/agents/chat', async (req, res) => {
 
     // Try Google Gemini AI first
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
       const prompt = `You are a professional virtual receptionist for a web development company. Your role is to:
 

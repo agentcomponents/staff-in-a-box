@@ -75,10 +75,11 @@ app.post('/api/agents/chat', async (req, res) => {
 
     const lowerMessage = message.toLowerCase();
 
-    // Check if user is providing lead information
+    // Always try to extract lead information if we haven't collected a lead yet
     if (session.hasMadeBusinessInquiry && !session.leadCollected) {
       const leadData = extractLeadInfo(message);
       if (leadData.hasContact) {
+        // Merge new info with existing info
         session.leadInfo = { ...session.leadInfo, ...leadData };
 
         // Check if we have all required info
@@ -100,13 +101,25 @@ app.post('/api/agents/chat', async (req, res) => {
             }
           });
         } else {
+          // More intelligent missing info detection
           const missing = [];
           if (!session.leadInfo.name) missing.push('name');
           if (!session.leadInfo.email && !session.leadInfo.phone) missing.push('email or phone number');
 
+          let response;
+          if (leadData.name && !leadData.email && !leadData.phone) {
+            response = `Thanks ${leadData.name}! Could I also get your email or phone number so we can follow up with you about your project?`;
+          } else if (leadData.email && !leadData.name) {
+            response = `I have your email address. Could I also get your name so we can personalize our follow-up?`;
+          } else if (leadData.phone && !leadData.name) {
+            response = `I have your phone number. Could I also get your name so we can personalize our follow-up?`;
+          } else {
+            response = `Could I get your ${missing.join(' and ')}? This helps us follow up with you properly about your project.`;
+          }
+
           return res.json({
             response: {
-              message: `Could I also get your ${missing.join(' and ')}? This helps us follow up with you properly.`,
+              message: response,
               agentType: 'receptionist'
             }
           });
@@ -139,10 +152,16 @@ app.post('/api/agents/chat', async (req, res) => {
 
 IMPORTANT: Keep responses SHORT and DIRECT. Answer their specific question first.
 
+Context:
+- Session state: Greeted=${session.hasGreeted}, Business inquiry=${session.hasMadeBusinessInquiry}, Lead collected=${session.leadCollected}
+- Collected info: Name="${session.leadInfo.name || 'none'}", Email="${session.leadInfo.email || 'none'}", Phone="${session.leadInfo.phone || 'none'}"
+
 Guidelines:
 - Answer their actual question directly
 - Keep responses under 2 sentences for non-business questions
+- If they seem confused or give unclear responses, gently redirect to web development
 - Pricing: Simple sites $1,500-$3,000, Business sites $3,000-$8,000, E-commerce $8,000-$15,000+
+- Don't ask for information you already have
 
 Customer message: "${message}"`;
 
@@ -201,34 +220,66 @@ function shouldCollectLead(message) {
 function extractLeadInfo(message) {
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   const phoneRegex = /(\+?1?[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/;
-  const nameRegex = /(?:my name is|i'm|i am|call me)\s+([a-zA-Z\s]{2,30})(?:\s+and|$)/i;
+
+  // Multiple name patterns
+  const namePatterns = [
+    /(?:my name is|i'm|i am|call me)\s+([a-zA-Z\s]{2,30})(?:\s+and|,|$)/i,
+    /(?:it'?s|this is)\s+([a-zA-Z\s]{2,30})(?:\s+and|,|$)/i,
+    /(?:my nae is|my nam is)\s+([a-zA-Z\s]{2,30})(?:\s+and|,|$)/i, // Handle typos
+  ];
 
   const result = {
     hasContact: false
   };
 
+  // Extract email
   const email = message.match(emailRegex);
   if (email) {
     result.email = email[0];
     result.hasContact = true;
   }
 
+  // Extract phone
   const phone = message.match(phoneRegex);
   if (phone) {
     result.phone = phone[0];
     result.hasContact = true;
   }
 
-  const name = message.match(nameRegex);
-  if (name) {
-    result.name = name[1].trim();
-    result.hasContact = true;
+  // Extract name using multiple patterns
+  for (const pattern of namePatterns) {
+    const nameMatch = message.match(pattern);
+    if (nameMatch) {
+      result.name = nameMatch[1].trim();
+      result.hasContact = true;
+      break;
+    }
   }
 
-  // Simple name detection for messages that are just names (2-3 words)
-  if (!result.name && message.split(' ').length >= 2 && message.split(' ').length <= 3 && /^[a-zA-Z\s]+$/.test(message.trim())) {
-    result.name = message.trim();
-    result.hasContact = true;
+  // Handle "Name, email@domain.com" format
+  if (email && !result.name) {
+    const parts = message.split(',');
+    if (parts.length >= 2) {
+      const potentialName = parts[0].trim();
+      if (potentialName.length >= 2 && potentialName.length <= 30 && /^[a-zA-Z\s]+$/.test(potentialName)) {
+        result.name = potentialName;
+      }
+    }
+  }
+
+  // Simple name detection for standalone names (but be more careful)
+  if (!result.name && !email && !phone) {
+    const trimmed = message.trim();
+    const words = trimmed.split(/\s+/);
+
+    // Check if it looks like a name (1-3 words, only letters and spaces, reasonable length)
+    if (words.length >= 1 && words.length <= 3 &&
+        trimmed.length >= 2 && trimmed.length <= 30 &&
+        /^[a-zA-Z\s]+$/.test(trimmed) &&
+        !['ok', 'yes', 'no', 'sure', 'thanks', 'hello', 'hi', 'hey'].includes(trimmed.toLowerCase())) {
+      result.name = trimmed;
+      result.hasContact = true;
+    }
   }
 
   return result;

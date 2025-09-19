@@ -10,10 +10,10 @@ const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY);
 // In-memory session storage (use Redis/database in production)
 const sessions = new Map();
 
-// Lead logging function (simplified for now - can add Google Sheets later)
+// Lead logging function with Google Sheets integration
 async function logLeadToSheet(leadData) {
   try {
-    // For now, just log to console - this ensures Railway stability
+    // Always log to console first
     console.log('🎯 NEW LEAD COLLECTED:', {
       timestamp: new Date().toISOString(),
       name: leadData.name,
@@ -23,11 +23,65 @@ async function logLeadToSheet(leadData) {
       source: 'AI Chat Widget'
     });
 
-    // TODO: Add Google Sheets integration once Railway is stable
-    // The smart conversation tracking and lead collection is working perfectly!
+    // Try to log to Google Sheets if credentials are configured
+    if (process.env.GOOGLE_SHEETS_ID && process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL && process.env.GOOGLE_PRIVATE_KEY) {
+      await logToGoogleSheets(leadData);
+    } else {
+      console.log('📝 Google Sheets not configured - lead logged to console only');
+    }
 
   } catch (error) {
     console.error('Error logging lead:', error);
+  }
+}
+
+// Google Sheets integration using HTTP API
+async function logToGoogleSheets(leadData) {
+  try {
+    const { JWT } = require('google-auth-library');
+
+    // Create JWT client
+    const jwtClient = new JWT({
+      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    // Get access token
+    const tokens = await jwtClient.authorize();
+    const accessToken = tokens.access_token;
+
+    // Prepare the data row
+    const rowData = [
+      new Date().toISOString(),
+      leadData.name,
+      leadData.email || '',
+      leadData.phone || '',
+      leadData.inquiry,
+      'AI Chat Widget'
+    ];
+
+    // Make HTTP request to Google Sheets API
+    const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${process.env.GOOGLE_SHEETS_ID}/values/Sheet1!A:F:append?valueInputOption=USER_ENTERED`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        values: [rowData]
+      })
+    });
+
+    if (response.ok) {
+      console.log('✅ Lead successfully logged to Google Sheets');
+    } else {
+      const errorText = await response.text();
+      console.error('❌ Google Sheets API error:', errorText);
+    }
+
+  } catch (error) {
+    console.error('❌ Error logging to Google Sheets:', error.message);
   }
 }
 

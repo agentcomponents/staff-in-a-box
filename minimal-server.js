@@ -235,39 +235,53 @@ app.post('/api/agents/chat', async (req, res) => {
       session.leadInfo.inquiry = message;
     }
 
-    // Use AI for intelligent responses
+    // Use AI for intelligent responses - primary conversation handler
     try {
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+      // Build conversation history for context
+      const recentMessages = session.messages.slice(-6); // Last 6 messages for context
+      const conversationContext = recentMessages.map(msg => `${msg.role}: ${msg.content}`).join('\n');
 
       let prompt = `You are a professional virtual receptionist for a web development company.
 
 CRITICAL RULES:
 - NEVER make up phone numbers, emails, or any contact information
 - NEVER claim you will call someone unless they've provided a phone number
-- Keep responses SHORT and DIRECT
-- Only state facts you know for certain
+- Be conversational and helpful, not robotic
+- Progress the conversation naturally toward understanding their needs
+- If someone asks non-business questions (what time is it, are you human, etc), politely redirect to web development
 
-Context:
-- Session state: Greeted=${session.hasGreeted}, Business inquiry=${session.hasMadeBusinessInquiry}, Lead collected=${session.leadCollected}
-- Collected info: Name="${session.leadInfo.name || 'none'}", Email="${session.leadInfo.email || 'none'}", Phone="${session.leadInfo.phone || 'none'}"
+CONVERSATION CONTEXT:
+${conversationContext}
 
-Guidelines:
-- Answer their actual question directly
-- Keep responses under 2 sentences for non-business questions
-- If they say "call me" but haven't provided a phone number, ask for their phone number
-- Pricing: Simple sites $1,500-$3,000, Business sites $3,000-$8,000, E-commerce $8,000-$15,000+
-- Don't ask for information you already have
-- If they give unclear responses, ask clarifying questions about their website needs
+SESSION INFO:
+- Has made business inquiry: ${session.hasMadeBusinessInquiry}
+- Lead collected: ${session.leadCollected}
+- Known info: Name="${session.leadInfo.name || 'none'}", Email="${session.leadInfo.email || 'none'}", Phone="${session.leadInfo.phone || 'none'}"
 
-Customer message: "${message}"`;
+PRICING REFERENCE:
+- Simple sites: $1,500-$3,000
+- Business sites: $3,000-$8,000
+- E-commerce: $8,000-$15,000+
 
-      // If they've made a business inquiry but we haven't collected leads, ask for contact info
-      if (session.hasMadeBusinessInquiry && !session.leadCollected && shouldCollectLead(message)) {
-        prompt += `\n\nAfter answering their question, ask for their name and contact information (email or phone) so you can follow up with more details about their project.`;
-      }
+CURRENT MESSAGE: "${message}"
+
+Instructions:
+- If they mention website needs (simple site, business, etc), acknowledge and ask follow-up questions
+- If they ask about pricing, provide ranges and ask about their specific needs
+- If they seem ready to move forward, ask for contact information
+- Keep responses natural and conversational, not repetitive
+- Don't ask for information you already have`;
 
       const result = await model.generateContent(prompt);
       const aiResponse = result.response.text();
+
+      // Update session state based on AI conversation
+      if (isBusinessInquiry(message) && !session.hasMadeBusinessInquiry) {
+        session.hasMadeBusinessInquiry = true;
+        session.leadInfo.inquiry = message;
+      }
 
       return res.json({
         response: {
@@ -278,11 +292,11 @@ Customer message: "${message}"`;
 
     } catch (aiError) {
       console.error('AI Error:', aiError);
-      // Fall back to hardcoded responses
+      // Fall back to smart fallback only if AI fails
     }
 
-    // Fallback responses with state awareness
-    let response = getStateAwareFallbackResponse(message, session);
+    // Intelligent fallback only for AI failures
+    let response = getIntelligentFallback(message, session);
 
     res.json({
       response: {
@@ -304,7 +318,14 @@ function isGreeting(message) {
 }
 
 function isBusinessInquiry(message) {
-  const businessKeywords = ['website', 'price', 'cost', 'quote', 'project', 'development', 'design', 'ecommerce', 'business', 'site'];
+  const businessKeywords = [
+    'website', 'site', 'web', 'page', 'homepage', 'landing',
+    'price', 'cost', 'quote', 'pricing', 'how much', 'budget',
+    'project', 'development', 'design', 'build', 'create', 'make',
+    'ecommerce', 'e-commerce', 'store', 'shop', 'business',
+    'simple', 'basic', 'complex', 'custom', 'professional',
+    'need', 'want', 'looking for', 'require', 'help with'
+  ];
   return businessKeywords.some(keyword => message.toLowerCase().includes(keyword));
 }
 
@@ -381,7 +402,7 @@ function extractLeadInfo(message) {
   return result;
 }
 
-function getStateAwareFallbackResponse(message, session) {
+function getIntelligentFallback(message, session) {
   const lowerMessage = message.toLowerCase();
 
   // Detect bot testing/spam behavior

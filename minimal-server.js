@@ -1,7 +1,6 @@
 const express = require('express');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { GoogleSpreadsheet } = require('google-spreadsheet');
-const { JWT } = require('google-auth-library');
+const { google } = require('googleapis');
 require('dotenv').config();
 
 const app = express();
@@ -20,28 +19,37 @@ async function logLeadToSheet(leadData) {
       return;
     }
 
-    const serviceAccountAuth = new JWT({
-      email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
+    // Create JWT auth
+    const auth = new google.auth.JWT(
+      process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+      null,
+      process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      ['https://www.googleapis.com/auth/spreadsheets']
+    );
 
-    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEETS_ID, serviceAccountAuth);
-    await doc.loadInfo();
+    const sheets = google.sheets({ version: 'v4', auth });
 
-    const sheet = doc.sheetsByIndex[0]; // First sheet
-    await sheet.addRow({
-      Timestamp: new Date().toISOString(),
-      Name: leadData.name,
-      Email: leadData.email,
-      Phone: leadData.phone,
-      Inquiry: leadData.inquiry,
-      Source: 'AI Chat Widget'
+    // Add row to spreadsheet
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: process.env.GOOGLE_SHEETS_ID,
+      range: 'Sheet1!A:F',
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [[
+          new Date().toISOString(),
+          leadData.name,
+          leadData.email || '',
+          leadData.phone || '',
+          leadData.inquiry,
+          'AI Chat Widget'
+        ]]
+      }
     });
 
     console.log('Lead logged to Google Sheets:', leadData.name);
   } catch (error) {
     console.error('Error logging lead to Google Sheets:', error);
+    console.log('Logging lead locally instead:', leadData);
   }
 }
 

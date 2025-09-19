@@ -384,6 +384,30 @@ function extractLeadInfo(message) {
 function getStateAwareFallbackResponse(message, session) {
   const lowerMessage = message.toLowerCase();
 
+  // Detect bot testing/spam behavior
+  const spamIndicators = ['you are human', 'are you a bot', 'what time is it', 'i like you', 'what you do'];
+  const isSpammy = spamIndicators.some(indicator => lowerMessage.includes(indicator));
+
+  // Count consecutive non-business messages
+  if (!session.consecutiveNonBusiness) session.consecutiveNonBusiness = 0;
+
+  if (isSpammy || (!isBusinessInquiry(message) && session.consecutiveNonBusiness >= 2)) {
+    session.consecutiveNonBusiness++;
+
+    if (session.consecutiveNonBusiness >= 4) {
+      return "I'm here specifically to help with web development projects. If you need a website, I'm happy to assist. Otherwise, have a great day!";
+    } else if (session.consecutiveNonBusiness >= 3) {
+      return "I'm a virtual assistant focused on web development services. Do you have a website project I can help you with?";
+    } else {
+      return "I help with web development projects. Are you looking to build a website?";
+    }
+  }
+
+  // Reset counter for business-related messages
+  if (isBusinessInquiry(message)) {
+    session.consecutiveNonBusiness = 0;
+  }
+
   // If we need to collect lead info
   if (session.hasMadeBusinessInquiry && !session.leadCollected && shouldCollectLead(message)) {
     if (lowerMessage.includes('price') || lowerMessage.includes('cost') || lowerMessage.includes('how much')) {

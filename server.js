@@ -128,9 +128,46 @@ app.use((err, req, res, next) => {
 
 // Start server
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  logger.info(`Staff in a Box server running on port ${PORT}`);
+const HOST = '0.0.0.0';
+
+console.log('Starting Staff in a Box server...');
+console.log('Environment variables:');
+console.log('- PORT:', process.env.PORT);
+console.log('- NODE_ENV:', process.env.NODE_ENV);
+console.log(`Attempting to bind to ${HOST}:${PORT}`);
+
+server.listen(PORT, HOST, () => {
+  logger.info(`✅ Staff in a Box server successfully started on ${HOST}:${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`✅ Server successfully started on ${HOST}:${PORT}`);
+  console.log(`Health check: http://${HOST}:${PORT}/health`);
+});
+
+server.on('error', (error) => {
+  logger.error('❌ Server error:', error);
+  console.error('❌ Server error:', error);
+  process.exit(1);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  logger.info('SIGTERM received, shutting down gracefully');
+  server.close(() => {
+    console.log('Server closed');
+    logger.info('Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  logger.info('SIGINT received, shutting down gracefully');
+  server.close(() => {
+    console.log('Server closed');
+    logger.info('Server closed');
+    process.exit(0);
+  });
 });
 
 module.exports = { app, server, io };

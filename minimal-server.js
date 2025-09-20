@@ -32,9 +32,22 @@ if (process.env.EMAIL_SERVICE && process.env.EMAIL_USER && process.env.EMAIL_PAS
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS
+    },
+    timeout: 10000, // 10 second timeout
+    connectionTimeout: 10000, // 10 second connection timeout
+    greetingTimeout: 5000, // 5 second greeting timeout
+    socketTimeout: 10000 // 10 second socket timeout
+  });
+
+  // Test email connection on startup
+  emailTransporter.verify((error, success) => {
+    if (error) {
+      console.log('❌ Email service connection failed:', error.message);
+      emailTransporter = null; // Disable email if connection fails
+    } else {
+      console.log('📧 Email service configured and verified ✅');
     }
   });
-  console.log('📧 Email service configured');
 } else {
   console.log('📧 Email service not configured - notifications will be logged only');
 }
